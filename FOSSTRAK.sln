@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 11.00
+# Visual Studio 2010
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TagDataTranslation", "TagDataTranslation\TagDataTranslation.csproj", "{3036442B-5517-496A-9F17-B5259A25C4D0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TagDataTranslationTests", "TagDataTranslationTests\TagDataTranslationTests.csproj", "{2C2C148B-5325-426F-9C2B-01B8DB71B58B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{8C68BB22-4638-4B93-A123-6EEC63291E63}"
+	ProjectSection(SolutionItems) = preProject
+		FOSSTRAK.vsmdi = FOSSTRAK.vsmdi
+		Local.testsettings = Local.testsettings
+		TraceAndTestImpact.testsettings = TraceAndTestImpact.testsettings
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(TestCaseManagementSettings) = postSolution
+		CategoryFile = FOSSTRAK.vsmdi
+	EndGlobalSection
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3036442B-5517-496A-9F17-B5259A25C4D0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3036442B-5517-496A-9F17-B5259A25C4D0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3036442B-5517-496A-9F17-B5259A25C4D0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3036442B-5517-496A-9F17-B5259A25C4D0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2C2C148B-5325-426F-9C2B-01B8DB71B58B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2C2C148B-5325-426F-9C2B-01B8DB71B58B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2C2C148B-5325-426F-9C2B-01B8DB71B58B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2C2C148B-5325-426F-9C2B-01B8DB71B58B}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
