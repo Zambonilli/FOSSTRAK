@@ -21,7 +21,12 @@ namespace FOSSTRAK.TDT
     public class TDTEngine
     {
 
-        #region Class/Member Variables
+        #region Data
+
+        /// <summary>
+        /// String formatter for a regex line
+        /// </summary>
+        private const String c_REGEXLINEFORMATTER = "^{0}$";
 
         /// <summary>
         /// associative array for the xref between GS1 company prefix &amp; Company prefix
@@ -75,11 +80,59 @@ namespace FOSSTRAK.TDT
             if (String.IsNullOrEmpty(input)) throw new ArgumentNullException("input");
             if (inputParameters == null) throw new ArgumentNullException("inputParameters");
 
-            // escape any uri chars that maybe encoded
+            // input normalization
             input = Uri.UnescapeDataString(input);
 
             // determine the input Option
             Tuple<Scheme, Level, Option> option = GetInputOption(input, inputParameters);
+
+            // now extract the various fields for the option from the input
+            Match m = new Regex(String.Format(c_REGEXLINEFORMATTER, option.Item3.pattern)).Match(input);
+            String[] fields = new String[option.Item3.field.Length];
+            foreach (Field f in option.Item3.field)
+            {
+                // find the field's token in the input
+                String token = m.Captures[int.Parse(f.seq)].Value;
+
+                // check if we have to uncompact & convert the binary into a decimal
+                if (option.Item2.type == LevelTypeList.BINARY)
+                {
+                    // check if it is compacted
+                    if (f.compactionSpecified)
+                    {
+                        if (f.bitPadDirSpecified)
+                        {
+                            int? compactNumber = null;
+                            switch (f.compaction)
+                            {
+                                case CompactionMethodList.Item5bit:
+                                    compactNumber = new int?(5);
+                                    break;
+                                case CompactionMethodList.Item6bit:
+                                    compactNumber = new int?(6);
+                                    break;
+                                case CompactionMethodList.Item7bit:
+                                    compactNumber = new int?(7);
+                                    break;
+                                case CompactionMethodList.Item8bit:
+                                    compactNumber = new int?(8);
+                                    break;
+                            }
+                        }
+                    }
+                }
+                
+                // check the character set
+                if (!String.IsNullOrEmpty(f.characterSet))
+                {
+                    if (!new Regex((f.characterSet.EndsWith("*")) ? f.characterSet : f.characterSet += "*").IsMatch(token))
+                    {
+                        throw new TDTException("Invalid " + f.name + " field value " + token + " according to its character set " + f.characterSet);
+                    }
+                }
+
+
+            }
 
             return null;
         }
@@ -164,13 +217,13 @@ namespace FOSSTRAK.TDT
             var query = from option in _options
                         where ((!String.IsNullOrEmpty(option.Item2.prefixMatch)) && (input.StartsWith(option.Item2.prefixMatch))) &&
                               ((!tagLength.HasValue) || (int.Parse(option.Item1.tagLength) == tagLength.Value)) &
-                              (new Regex("^" + option.Item3.pattern + "$").Match(input).Success) &
+                              (new Regex(String.Format(c_REGEXLINEFORMATTER, option.Item3.pattern)).Match(input).Success) &
                               (((option.Item2.type != LevelTypeList.BINARY) & (option.Item2.type != LevelTypeList.PURE_IDENTITY) & (option.Item2.type != LevelTypeList.TAG_ENCODING)) &
                                 (option.Item3.optionKey == GetInputParameterValue(option.Item1.optionKey, inputParameters)))
                         select option;
 
+            // process the results
             Tuple<Scheme, Level, Option>[] results = query.ToArray();
-
             if (results.Length == 0)
             {
                 throw new TDTException("No matching Scheme, Level, and Option for the input & inputParameters");
