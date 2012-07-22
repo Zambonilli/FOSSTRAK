@@ -45,7 +45,7 @@
       <DependentUpon>EpcTagDataTranslation.xsd</DependentUpon>
     </Compile>
     <Compile Include="TDTEngine.cs" />
-    <Compile Include="TDTException.cs" />
+    <Compile Include="TDTTranslationException.cs" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Readme.txt" />
@@ -102,6 +102,7 @@
     </Content>
     <Content Include="Resources\Schemes\SGTIN-96.xml">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <SubType>Designer</SubType>
     </Content>
     <Content Include="Resources\Schemes\SSCC-64.xml">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>

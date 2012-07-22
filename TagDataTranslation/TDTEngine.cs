@@ -1,4 +1,23 @@
-﻿using System;
+﻿/*
+ * Copyright (C) 2007-2012 University of Cambridge
+ *
+ * This file is part of Fosstrak (www.fosstrak.org).
+ *
+ * Fosstrak is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License version 2.1, as published by the Free Software Foundation.
+ *
+ * Fosstrak is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with Fosstrak; if not, write to the Free
+ * Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301  USA
+ */
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -12,10 +31,9 @@ using System.Threading.Tasks;
 namespace FOSSTRAK.TDT
 {
     /// <summary>
-    ///  This class provides methods for translating an electronic product code (EPC)
-    ///  between various levels of representation including BINARY, TAG_ENCODING,
-    ///  PURE_IDENTITY and LEGACY formats. An additional output level ONS_HOSTNAME may
-    ///  be defined for some coding schemes.
+    ///  This class provides methods for translating an electronic product code (EPC) between various levels of representation 
+    ///  including BINARY, TAG_ENCODING, PURE_IDENTITY and LEGACY formats. An additional output level ONS_HOSTNAME may be 
+    ///  defined for some coding schemes.
     /// </summary>
     /// <remarks>Author Mike Lohmeier myname@gmail.com</remarks>
     public class TDTEngine
@@ -31,7 +49,7 @@ namespace FOSSTRAK.TDT
         /// <summary>
         /// associative array for the xref between GS1 company prefix &amp; Company prefix
         /// </summary>
-        private Dictionary<String, String> _gs1cpi = new Dictionary<string, string>();
+        private Dictionary<String, String> _gs1cpi;
 
         /// <summary>
         /// IEnumerable of all of the options flattened out with ptrs to the option&apos;s Level and Scheme
@@ -47,8 +65,7 @@ namespace FOSSTRAK.TDT
         /// </summary>
         /// <remarks>
         /// Constructor for a new Tag Data Translation engine. This constructor loads and parses the schemes included in the directory Resources\Schemes 
-        /// The ManagerTranslation.xml file is loaded from a directory
-        /// called Resources\Auxiliary. All schemes must have filenames ending in .xml
+        /// The ManagerTranslation.xml file is loaded from a directory called Resources\Auxiliary. All schemes must have filenames ending in .xml
         /// </remarks>
         public TDTEngine()
         {
@@ -64,77 +81,92 @@ namespace FOSSTRAK.TDT
         #region Public Methods
 
         /// <summary>
-        /// The convert method translates a String input to a specified outbound
-        /// level of the same coding scheme. For example, the input string value may
-        /// be a tag-encoding URI and the outbound level specified by string
-        /// outboundlevel may be BINARY, in which case the return value is a binary
-        /// representation expressed as a string.
+        /// Translates <paramref name="epcIdentifier"/> from one representation into another within the same coding scheme.
+        /// [TDT 1.6 Version]
         /// </summary>
-        /// <param name="input">the identifier to be converted.</param>
-        /// <param name="suppliedInputParameters">additional parameters which need to be provided because they cannot always be determined from the input value alone. Examples include the taglength, companyprefixlength, gs1companyprefixlength and filter values.</param>
-        /// <param name="outputLevel">the outbound level required for the ouput. Permitted values include BINARY, TAG_ENCODING, PURE_IDENTITY, LEGACY and ONS_HOSTNAME.</param>
-        /// <returns>the identifier converted to the output level.</returns>
-        public String Convert(String input, IEnumerable<KeyValuePair<String, String>> inputParameters, LevelTypeList outputLevel)
+        /// <param name="epcIdentifier">The epcIdentifier to be converted.  This should be expressed as a string, in accordance with one of the grammars
+        /// or patterns in the TDT markup files, i.e. a binary string consisting of characters '0' and '1', a URI (either tag-encoding or pure-identity formats),
+        /// or a serialized identifier expressed as in Table 3</param>
+        /// <param name="parameterList">This is a parameter string containing key value pairs, using the semicolon [';'] as delimiter between key=value pairs.
+        /// <example>GTIN filter=3;companyprefixlength=7;tagLength=96</example>
+        /// </param>
+        /// <param name="outputFormat">The output format into which the epcIdentifier SHALL be converted.
+        /// <value>BINARY</value>
+        /// <value>LEGACY</value>
+        /// <value>LEGACY_AI</value>
+        /// <value>TAG_ENCODING</value>
+        /// <value>PURE_IDENTITY</value>
+        /// <value>ONS_HOSTNAME</value>
+        /// </param>
+        /// <returns>The converted value into one of the above formats as String.</returns>
+        public String Translate(String epcIdentifier, String parameterList, String outputFormat)
         {
-            // input validation
-            if (String.IsNullOrEmpty(input)) throw new ArgumentNullException("input");
-            if (inputParameters == null) throw new ArgumentNullException("inputParameters");
+            // paramater normalization/validation
+            epcIdentifier = epcIdentifier ?? String.Empty;
+            epcIdentifier = epcIdentifier.Trim();
+            parameterList = parameterList ?? String.Empty;
+            parameterList = parameterList.Trim();
+            outputFormat = outputFormat ?? String.Empty;
+            outputFormat = outputFormat.Trim();
+            LevelTypeList type;
+            if (String.IsNullOrEmpty(epcIdentifier)) throw new ArgumentNullException("epcIdentifier");
+            if (String.IsNullOrEmpty(outputFormat)) throw new ArgumentNullException("outputFormat");
+            if (!Enum.TryParse<LevelTypeList>(outputFormat, out type)) throw new ArgumentException("Invalid outputFormat", "outputFormat");
 
-            // input normalization
-            input = Uri.UnescapeDataString(input);
-
-            // determine the input Option
-            Tuple<Scheme, Level, Option> option = GetInputOption(input, inputParameters);
-
-            // now extract the various fields for the option from the input
-            Match m = new Regex(String.Format(c_REGEXLINEFORMATTER, option.Item3.pattern)).Match(input);
-            String[] fields = new String[option.Item3.field.Length];
-            foreach (Field f in option.Item3.field)
+            // convert the paramterList string to IEnumerable<Kvp<String, String>>
+            List<KeyValuePair<String, String>> parameters = new List<KeyValuePair<string, string>>();
+            String[] split = parameterList.Split(';');
+            foreach (String s in split)
             {
-                // find the field's token in the input
-                String token = m.Captures[int.Parse(f.seq)].Value;
-
-                // check if we have to uncompact & convert the binary into a decimal
-                if (option.Item2.type == LevelTypeList.BINARY)
+                String[] split2 = s.Trim().Split('=');
+                if (split2.Length == 2)
                 {
-                    // check if it is compacted
-                    if (f.compactionSpecified)
-                    {
-                        if (f.bitPadDirSpecified)
-                        {
-                            int? compactNumber = null;
-                            switch (f.compaction)
-                            {
-                                case CompactionMethodList.Item5bit:
-                                    compactNumber = new int?(5);
-                                    break;
-                                case CompactionMethodList.Item6bit:
-                                    compactNumber = new int?(6);
-                                    break;
-                                case CompactionMethodList.Item7bit:
-                                    compactNumber = new int?(7);
-                                    break;
-                                case CompactionMethodList.Item8bit:
-                                    compactNumber = new int?(8);
-                                    break;
-                            }
-                        }
-                    }
+                    parameters.Add(new KeyValuePair<string, string>(split2[0].Trim(), split2[1].Trim()));
                 }
-                
-                // check the character set
-                if (!String.IsNullOrEmpty(f.characterSet))
-                {
-                    if (!new Regex((f.characterSet.EndsWith("*")) ? f.characterSet : f.characterSet += "*").IsMatch(token))
-                    {
-                        throw new TDTException("Invalid " + f.name + " field value " + token + " according to its character set " + f.characterSet);
-                    }
-                }
-
-
             }
 
+            return Translate(epcIdentifier, parameters, type);
+        }
+
+        /// <summary>
+        /// Translates <paramref name="epcIdentifier"/> from one representation into another within the same coding scheme. 
+        /// [.NET BCL Version]
+        /// </summary>
+        /// <param name="epcIdentifier">The epcIdentifier to be converted.  This should be expressed as a string, in accordance with one of the grammars
+        /// or patterns in the TDT markup files, i.e. a binary string consisting of characters '0' and '1', a URI (either tag-encoding or pure-identity formats),
+        /// or a serialized identifier expressed as in Table 3</param>
+        /// <param name="parameterList">IEnumerable list of key value pair parameters needed for doing some translations</param>
+        /// <param name="outputFormat">The output format for the <paramref name="epcIdentifier"/> in the same scheme</param>
+        /// <returns>The converted value into one of the above formats as String.</returns>
+        public String Translate(String epcIdentifier, IEnumerable<KeyValuePair<String, String>> parameterList, LevelTypeList outputFormat)
+        {
+            // input normalization/validation
+            epcIdentifier = epcIdentifier ?? String.Empty;
+            epcIdentifier = epcIdentifier.Trim();
+            epcIdentifier = Uri.UnescapeDataString(epcIdentifier);
+            parameterList = parameterList ?? default(IEnumerable<KeyValuePair<String, String>>);
+            if (String.IsNullOrEmpty(epcIdentifier)) throw new ArgumentNullException("input");
+
+            // determine the input Option
+            Tuple<Scheme, Level, Option> option = GetInputOption(epcIdentifier, parameterList);
+
+            // extract the input tokens
+            String[] tokens = ExtractInputTokens(epcIdentifier, parameterList, option);
+
             return null;
+        }
+
+        /// <summary>
+        /// Checks each subscription for any update, reloading new rules where necessary and forces the software to reload or recompile its internal representation
+        /// of the encoding/decoding rules based on the current remaining subscriptions.
+        /// </summary>
+        public void RefreshTranslations()
+        {
+            // load the schmes
+            LoadEpcTagDataTranslations();
+
+            // load the xref into 
+            LoadGEPC64Table();
         }
 
         #endregion
@@ -151,6 +183,7 @@ namespace FOSSTRAK.TDT
         /// </exception>
         private void LoadGEPC64Table()
         {
+            _gs1cpi = new Dictionary<string, string>();
             XmlReader reader = XmlReader.Create(Environment.CurrentDirectory +
                 @"\Resources\Auxiliary\ManagerTranslation.xml");
             while (reader.Read())
@@ -176,12 +209,12 @@ namespace FOSSTRAK.TDT
             Task[] tasks = new Task[fileNames.Length];
             for (int i = 0; i < fileNames.Length; i++)
             {
-                tasks[i] = Task.Factory.StartNew(new Action<object>((fileName) => 
+                tasks[i] = Task.Factory.StartNew(new Action<object>((fileName) =>
                     {
                         // deserialize the file into the xsd.exe classes
                         XmlSerializer serializer = new XmlSerializer(typeof(EpcTagDataTranslation));
                         EpcTagDataTranslation tdt = (EpcTagDataTranslation)serializer.Deserialize(new FileStream(((String)fileName), FileMode.Open));
-                        
+
                         // do a breadth first traversal to flatten out and add to the list
                         foreach (Scheme s in tdt.scheme)
                         {
@@ -205,34 +238,117 @@ namespace FOSSTRAK.TDT
         /// <summary>
         /// Gets the Option for the input and the inputParameters
         /// </summary>
-        /// <param name="input">The tag input</param>
-        /// <param name="inputParameters">Additional parameters for Converting</param>
-        private Tuple<Scheme, Level, Option> GetInputOption(String input, IEnumerable<KeyValuePair<String, String>> inputParameters)
+        /// <param name="epcIdentifier">The tag input</param>
+        /// <param name="paramterList">Additional parameters for Converting</param>
+        private Tuple<Scheme, Level, Option> GetInputOption(String epcIdentifier, IEnumerable<KeyValuePair<String, String>> paramterList)
         {
             // get the optional taglength param
-            String temp = GetInputParameterValue("taglength", inputParameters);
+            String temp = GetInputParameterValue("taglength", paramterList);
             int? tagLength = (String.IsNullOrEmpty(temp)) ? null : new int?(int.Parse(temp));
 
             // build an über query for finding the correct option
             var query = from option in _options
-                        where ((!String.IsNullOrEmpty(option.Item2.prefixMatch)) && (input.StartsWith(option.Item2.prefixMatch))) &&
+                        where ((!String.IsNullOrEmpty(option.Item2.prefixMatch)) && (epcIdentifier.StartsWith(option.Item2.prefixMatch))) &&
                               ((!tagLength.HasValue) || (int.Parse(option.Item1.tagLength) == tagLength.Value)) &
-                              (new Regex(String.Format(c_REGEXLINEFORMATTER, option.Item3.pattern)).Match(input).Success) &
+                              (new Regex(String.Format(c_REGEXLINEFORMATTER, option.Item3.pattern)).Match(epcIdentifier).Success) &
                               (((option.Item2.type != LevelTypeList.BINARY) & (option.Item2.type != LevelTypeList.PURE_IDENTITY) & (option.Item2.type != LevelTypeList.TAG_ENCODING)) &
-                                (option.Item3.optionKey == GetInputParameterValue(option.Item1.optionKey, inputParameters)))
+                                (option.Item3.optionKey == GetInputParameterValue(option.Item1.optionKey, paramterList)))
                         select option;
 
             // process the results
             Tuple<Scheme, Level, Option>[] results = query.ToArray();
             if (results.Length == 0)
             {
-                throw new TDTException("No matching Scheme, Level, and Option for the input & inputParameters");
+                throw new TDTTranslationException("No matching Scheme, Level, and Option for the input & inputParameters");
             }
             else if (results.Length > 1)
             {
-                throw new TDTException("Multiple matching Scheme, Level and Options for the input & inputParameters");
+                throw new TDTTranslationException("Multiple matching Scheme, Level and Options for the input & inputParameters");
             }
             return results[0];
+        }
+
+        /// <summary>
+        /// Method to extract, validate and format the field tokens from the input into a string its string representation
+        /// </summary>
+        /// <param name="epcIdentifier">The input string to extract the tokens from</param>
+        /// <param name="parameterList">IEnumerable of kvp parameters for doing the translation</param>
+        /// <param name="option">The <paramref name="epcIdentifier"/>&apos;s option</param>
+        /// <returns>An array of the extracted tokens from the <paramref name="epcIdentifier"/></returns>
+        private String[] ExtractInputTokens(String epcIdentifier, IEnumerable<KeyValuePair<String, String>> parameterList, Tuple<Scheme, Level, Option> option)
+        {
+            // now extract the various fields for the option from the input
+            Match m = new Regex(String.Format(c_REGEXLINEFORMATTER, option.Item3.pattern)).Match(epcIdentifier);
+            String[] fields = new String[option.Item3.field.Length];
+            Field f;
+            String token;
+            for (int i = 0; i < option.Item3.field.Length; i++)
+            {
+                f = option.Item3.field[i];
+                token = m.Groups[int.Parse(f.seq)].Value;
+
+                // check if we have to uncompact & convert the binary into a decimal
+                if (option.Item2.type == LevelTypeList.BINARY)
+                {
+                    // check if it is compacted
+                    if (f.compactionSpecified)
+                    {
+                        int? compactNumber = null;
+                        switch (f.compaction)
+                        {
+                            case CompactionMethodList.Item5bit:
+                                compactNumber = new int?(5);
+                                break;
+                            case CompactionMethodList.Item6bit:
+                                compactNumber = new int?(6);
+                                break;
+                            case CompactionMethodList.Item7bit:
+                                compactNumber = new int?(7);
+                                break;
+                            case CompactionMethodList.Item8bit:
+                                compactNumber = new int?(8);
+                                break;
+                        }
+                        if ((f.bitPadDirSpecified) &
+                            (compactNumber.HasValue))
+                        {
+                            token = StripTokenBinaryPadding(token, f.bitPadDir, compactNumber.Value);
+                        }
+
+                        // convert the sequence of bytes to a string
+                    }
+                }
+                else
+                {
+                    // check the character set
+                    CheckTokenCharacterSet(f, token);
+
+                    // check the min/max
+                    CheckTokenMinMax(f, token);
+                }
+
+                // add the extracted, validated & formated token to the return array
+                fields[i] = token;
+            }
+
+            return fields;
+        }
+
+        /// <summary>
+        /// Method to check the CharacterSet of an input token
+        /// </summary>
+        /// <param name="f"></param>
+        /// <param name="token"></param>
+        private static void CheckTokenCharacterSet(Field f, String token)
+        {
+            if (!String.IsNullOrEmpty(f.characterSet))
+            {
+                String pattern = (f.characterSet.EndsWith("*")) ? f.characterSet : f.characterSet += "*";
+                if (!new Regex(String.Format(c_REGEXLINEFORMATTER, pattern)).IsMatch(token))
+                {
+                    throw new TDTTranslationException("Invalid " + f.name + " field value " + token + " according to its character set " + f.characterSet);
+                }
+            }
         }
 
         /// <summary>
@@ -250,11 +366,140 @@ namespace FOSSTRAK.TDT
             if (inputParameters == null) throw new ArgumentNullException("inputParameters");
 
             KeyValuePair<String, String> kvp = inputParameters.SingleOrDefault((kvp2) => kvp2.Key.ToLower().Trim() == parameterName.Trim().ToLower());
-            if (!kvp.Equals(default(KeyValuePair<String,String>)))
+            if (!kvp.Equals(default(KeyValuePair<String, String>)))
             {
                 return kvp.Value;
             }
             return null;
         }
+
+        /// <summary>
+        /// Method to check an input tokens min and max based on the min and max field attributes
+        /// </summary>
+        /// <param name="fieldName">The name of the field</param>
+        /// <param name="token"></param>
+        /// <param name="min"></param>
+        /// <param name="max"></param>
+        private static void CheckTokenMinMax(Field f, String token)
+        {
+            Decimal result, min, max;
+            if ((!String.IsNullOrEmpty(f.decimalMinimum)) &&
+                (!String.IsNullOrEmpty(f.decimalMaximum)) &&
+                (!String.IsNullOrEmpty(token)) &&
+                (Decimal.TryParse(token, out result)) &
+                (Decimal.TryParse(f.decimalMinimum, out min)) &
+                (Decimal.TryParse(f.decimalMaximum, out max)))
+            {
+                if (result < min)
+                {
+                    throw new TDTTranslationException("TDTFieldBelowMinimum Field:" + f.name + " Value:" + token + " Min:" + min.ToString());
+                }
+                if (result > max)
+                {
+                    throw new TDTTranslationException("TDTFieldAboveMaximum Field:" + f.name + " Value:" + token + " Max:" + max.ToString());
+                }
+            }
+        }
+
+        /// <summary>
+        /// Method to Strip the binary padding from a token
+        /// </summary>
+        /// <param name="bitPadDir">The bit side that has been compacted</param>
+        /// <param name="compaction">The compaction base ie 8bit, 7bit</param>
+        /// <param name="token">Token to strip binary padding from</param>
+        /// <returns><paramref name="token"/> stripped of all padding</returns>
+        private static String StripTokenBinaryPadding(String token, PadDirectionList bitPadDir, int compaction)
+        {
+            // TODO Buy ISO 15962 and figure out how single char compaction works 
+            // with RFID this is just a syntatical port of the java 1.4 FOSSTRAK implementation
+            String stripped;
+            Regex testregex = new Regex("^0+$");
+
+            // check if line includes filename.xml - if so, extract auxiliaryfile
+            // all zeros means that the token should be looked up from the auxillary file..
+            Match testmatcher2 = testregex.Match(token);
+            if (testmatcher2.Success)
+            {
+                stripped = "0";
+            }
+            else
+            {
+                if (compaction >= 4)
+                {
+                    if (bitPadDir == PadDirectionList.RIGHT)
+                    {
+                        int lastnonzerobit = token.LastIndexOf("1");
+                        int bitsforstripped = compaction * (1 + lastnonzerobit / compaction);
+                        stripped = token.Substring(0, bitsforstripped);
+                    }
+                    else
+                    {
+                        int firstnonzerobit = token.IndexOf("1");
+                        int length = token.Length;
+                        int bitsforstripped = compaction * (1 + (length - firstnonzerobit) / compaction);
+                        stripped = token.Substring(length - bitsforstripped);
+                    }
+
+                }
+                else
+                {
+                    if (bitPadDir == PadDirectionList.RIGHT)
+                    {
+                        int lastnonzerobit = token.LastIndexOf("1");
+                        stripped = token.Substring(0, lastnonzerobit);
+                    }
+                    else
+                    {
+                        int firstnonzerobit = token.IndexOf("1");
+                        stripped = token.Substring(firstnonzerobit);
+                    }
+
+                }
+            }
+            return stripped;
+        }
+
+        ///// <summary>
+        ///// Converts a binary string to a character string according to the specified compaction
+        ///// </summary>
+        ///// <param name="value"></param>
+        ///// <param name="compaction"></param>
+        ///// <returns></returns>
+        //private String BinaryToString(String value, int compaction)
+        //{
+        //    // TODO Buy ISO 15962 and figure out how single char compaction works 
+        //    // with RFID this is just a syntatical port of the java 1.4 FOSSTRAK implementation
+        //    switch (compaction)
+        //    {
+        //        case 5:
+        //            {
+        //                // "5-bit"
+        //                return bin2uppercasefive(value);
+        //                break;
+        //            }
+        //        case 6:
+        //            {
+        //                // 6-bit
+        //                return bin2alphanumsix(value);
+        //                break;
+        //            }
+        //        case 7:
+        //            {
+        //                // 7-bit
+        //                return bin2asciiseven(value);
+        //                break;
+        //            }
+        //        case 8:
+        //            {
+        //                 // 8-bit
+        //                return bin2bytestring(value);
+        //                break;
+        //            }
+        //        default:
+        //            {
+
+        //            }
+        //    }
+        //}
     }
 }
