@@ -130,7 +130,7 @@ namespace FOSSTRAK.TDT
 
         /// <summary>
         /// Translates <paramref name="epcIdentifier"/> from one representation into another within the same coding scheme. 
-        /// [.NET BCL Version]
+        /// [.NET Version]
         /// </summary>
         /// <param name="epcIdentifier">The epcIdentifier to be converted.  This should be expressed as a string, in accordance with one of the grammars
         /// or patterns in the TDT markup files, i.e. a binary string consisting of characters '0' and '1', a URI (either tag-encoding or pure-identity formats),
@@ -148,10 +148,13 @@ namespace FOSSTRAK.TDT
             if (String.IsNullOrEmpty(epcIdentifier)) throw new ArgumentNullException("input");
 
             // determine the input Option
-            Tuple<Scheme, Level, Option> option = GetInputOption(epcIdentifier, parameterList);
+            Tuple<Scheme, Level, Option> inputOption = GetInputOption(epcIdentifier, parameterList);
+
+            // determine the output Option, seems to easy of a query
+            Tuple<Scheme, Level, Option> outputOption = _options.Single((o) => o.Item2.type == outputFormat & o.Item3.optionKey == inputOption.Item3.optionKey);
 
             // extract the input tokens
-            String[] tokens = ExtractInputTokens(epcIdentifier, parameterList, option);
+            String[] tokens = ExtractInputTokens(epcIdentifier, parameterList, inputOption, outputOption);
 
             return null;
         }
@@ -269,26 +272,26 @@ namespace FOSSTRAK.TDT
         }
 
         /// <summary>
-        /// Method to extract, validate and format the field tokens from the input into a string its string representation
+        /// Method to extract, validate and format the field tokens from the input into its string representation
         /// </summary>
         /// <param name="epcIdentifier">The input string to extract the tokens from</param>
         /// <param name="parameterList">IEnumerable of kvp parameters for doing the translation</param>
         /// <param name="option">The <paramref name="epcIdentifier"/>&apos;s option</param>
         /// <returns>An array of the extracted tokens from the <paramref name="epcIdentifier"/></returns>
-        private String[] ExtractInputTokens(String epcIdentifier, IEnumerable<KeyValuePair<String, String>> parameterList, Tuple<Scheme, Level, Option> option)
+        private String[] ExtractInputTokens(String epcIdentifier, IEnumerable<KeyValuePair<String, String>> parameterList, Tuple<Scheme, Level, Option> inputOption, Tuple<Scheme, Level, Option> outputOption)
         {
             // now extract the various fields for the option from the input
-            Match m = new Regex(String.Format(c_REGEXLINEFORMATTER, option.Item3.pattern)).Match(epcIdentifier);
-            String[] fields = new String[option.Item3.field.Length];
+            Match m = new Regex(String.Format(c_REGEXLINEFORMATTER, inputOption.Item3.pattern)).Match(epcIdentifier);
+            String[] fields = new String[inputOption.Item3.field.Length];
             Field f;
             String token;
-            for (int i = 0; i < option.Item3.field.Length; i++)
+            for (int i = 0; i < inputOption.Item3.field.Length; i++)
             {
-                f = option.Item3.field[i];
+                f = inputOption.Item3.field[i];
                 token = m.Groups[int.Parse(f.seq)].Value;
 
                 // check if we have to uncompact & convert the binary into a decimal
-                if (option.Item2.type == LevelTypeList.BINARY)
+                if (inputOption.Item2.type == LevelTypeList.BINARY)
                 {
                     // check if it is compacted
                     if (f.compactionSpecified)
@@ -312,10 +315,50 @@ namespace FOSSTRAK.TDT
                         if ((f.bitPadDirSpecified) &
                             (compactNumber.HasValue))
                         {
+                            // strip the preceding or trailing 0 chars based on the compaction bit level
                             token = StripTokenBinaryPadding(token, f.bitPadDir, compactNumber.Value);
                         }
 
                         // convert the sequence of bytes to a string
+                        token = BinaryToString(token, compactNumber.Value);
+
+                        // check the character set
+                        CheckTokenCharacterSet(f, token);
+                    }
+                    else
+                    {
+                        if (f.bitPadDirSpecified)
+                        {
+                            token = StripTokenBinaryPadding(token, f.bitPadDir, 0);
+                        }
+
+                        // convert the sequence of bytes to a string
+                        token = Bin2Dec(token);
+
+                        if (token.Length > 0)
+                        {
+                            CheckTokenMinMax(f, token);
+                        }
+                    }
+
+                    Field outputField = outputOption.Item3.field.Single((f2) => f2.name == f.name);
+                    if (f.padDirSpecified)
+                    {
+                        if (outputField.padDirSpecified)
+                        {
+                            throw new TDTTranslationException("Invalid TDT definition file");
+                        }
+                        else
+                        {
+                            token = StripPadChar(token, f.padDir, f.padChar);
+                        }
+                    }
+                    else
+                    {
+                        if (outputField.padDirSpecified)
+                        {
+                            token = ApplyPadChar(token, outputField.padDir, outputField.padChar, int.Parse(outputField.length));
+                        }
                     }
                 }
                 else
@@ -330,7 +373,6 @@ namespace FOSSTRAK.TDT
                 // add the extracted, validated & formated token to the return array
                 fields[i] = token;
             }
-
             return fields;
         }
 
@@ -411,95 +453,199 @@ namespace FOSSTRAK.TDT
         private static String StripTokenBinaryPadding(String token, PadDirectionList bitPadDir, int compaction)
         {
             // TODO Buy ISO 15962 and figure out how single char compaction works 
-            // with RFID this is just a syntatical port of the java 1.4 FOSSTRAK implementation
-            String stripped;
-            Regex testregex = new Regex("^0+$");
-
-            // check if line includes filename.xml - if so, extract auxiliaryfile
-            // all zeros means that the token should be looked up from the auxillary file..
-            Match testmatcher2 = testregex.Match(token);
-            if (testmatcher2.Success)
+            // with RFID this is just a logical port of the java 1.4 FOSSTRAK implementation            
+            if (compaction >= 4)
             {
-                stripped = "0";
-            }
-            else
-            {
-                if (compaction >= 4)
+                if (bitPadDir == PadDirectionList.RIGHT)
                 {
-                    if (bitPadDir == PadDirectionList.RIGHT)
-                    {
-                        int lastnonzerobit = token.LastIndexOf("1");
-                        int bitsforstripped = compaction * (1 + lastnonzerobit / compaction);
-                        stripped = token.Substring(0, bitsforstripped);
-                    }
-                    else
-                    {
-                        int firstnonzerobit = token.IndexOf("1");
-                        int length = token.Length;
-                        int bitsforstripped = compaction * (1 + (length - firstnonzerobit) / compaction);
-                        stripped = token.Substring(length - bitsforstripped);
-                    }
-
+                    int lastnonzerobit = token.LastIndexOf("1");
+                    int bitsforstripped = compaction * (1 + lastnonzerobit / compaction);
+                    return token.Substring(0, bitsforstripped);
                 }
                 else
                 {
-                    if (bitPadDir == PadDirectionList.RIGHT)
-                    {
-                        int lastnonzerobit = token.LastIndexOf("1");
-                        stripped = token.Substring(0, lastnonzerobit);
-                    }
-                    else
-                    {
-                        int firstnonzerobit = token.IndexOf("1");
-                        stripped = token.Substring(firstnonzerobit);
-                    }
-
+                    int firstnonzerobit = token.IndexOf("1");
+                    int length = token.Length;
+                    int bitsforstripped = compaction * (1 + (length - firstnonzerobit) / compaction);
+                    return token.Substring(length - bitsforstripped);
                 }
+
             }
-            return stripped;
+            else
+            {
+                if (bitPadDir == PadDirectionList.RIGHT)
+                {
+                    int lastnonzerobit = token.LastIndexOf("1");
+                    return token.Substring(0, lastnonzerobit);
+                }
+                else
+                {
+                    int firstnonzerobit = token.IndexOf("1");
+                    return token.Substring(firstnonzerobit);
+                }
+
+            }
         }
 
-        ///// <summary>
-        ///// Converts a binary string to a character string according to the specified compaction
-        ///// </summary>
-        ///// <param name="value"></param>
-        ///// <param name="compaction"></param>
-        ///// <returns></returns>
-        //private String BinaryToString(String value, int compaction)
-        //{
-        //    // TODO Buy ISO 15962 and figure out how single char compaction works 
-        //    // with RFID this is just a syntatical port of the java 1.4 FOSSTRAK implementation
-        //    switch (compaction)
-        //    {
-        //        case 5:
-        //            {
-        //                // "5-bit"
-        //                return bin2uppercasefive(value);
-        //                break;
-        //            }
-        //        case 6:
-        //            {
-        //                // 6-bit
-        //                return bin2alphanumsix(value);
-        //                break;
-        //            }
-        //        case 7:
-        //            {
-        //                // 7-bit
-        //                return bin2asciiseven(value);
-        //                break;
-        //            }
-        //        case 8:
-        //            {
-        //                 // 8-bit
-        //                return bin2bytestring(value);
-        //                break;
-        //            }
-        //        default:
-        //            {
+        /// <summary>
+        /// Converts a binary string to a character string according to the specified compaction
+        /// </summary>
+        /// <param name="value"></param>
+        /// <param name="compaction"></param>
+        /// <returns></returns>
+        private String BinaryToString(String value, int compaction)
+        {
+            // TODO Buy ISO 15962 and figure out how single char compaction works 
+            // with RFID this is just a logical port of the java 1.4 FOSSTRAK implementation
+            switch (compaction)
+            {
+                case 5:
+                    return Bin2UpperCaseFive(value);
+                case 6:
+                    return Bin2AlphaNumSix(value);
+                case 7:
+                    return bin2asciiseven(value);
+                case 8:
+                    return bin2bytestring(value);
+                // future unicode support goes here
+                default:
+                    throw new TDTTranslationException("unsupported compaction method " + compaction.ToString());
+            }
+        }
 
-        //            }
-        //    }
-        //}
+        private String bin2bytestring(String binary)
+        {
+            // TODO Buy ISO 15962 and figure out how single char compaction works 
+            // with RFID this is just a logical port of the java 1.4 FOSSTRAK implementation
+            String bytestring;
+            StringBuilder buffer = new StringBuilder();
+            int len = binary.Length;
+            for (int i = 0; i < len; i += 8)
+            {
+                int j = int.Parse(Bin2Dec(padBinary(binary.Substring(i, i + 8), 8)));
+                buffer.Append((char)j);
+            }
+            bytestring = buffer.ToString();
+            return bytestring;
+        }
+
+        private String bin2asciiseven(String binary)
+        {
+            // TODO Buy ISO 15962 and figure out how single char compaction works 
+            // with RFID this is just a logical port of the java 1.4 FOSSTRAK implementation
+            String asciiseven;
+            StringBuilder buffer = new StringBuilder();
+            int len = binary.Length;
+            for (int i = 0; i < len; i += 7)
+            {
+                int j = int.Parse(Bin2Dec(padBinary(binary.Substring(i, i + 7), 8)));
+                buffer.Append((char)j);
+            }
+            asciiseven = buffer.ToString();
+            return asciiseven;
+        }
+
+        private String Bin2AlphaNumSix(String binary)
+        {
+            // TODO Buy ISO 15962 and figure out how single char compaction works 
+            // with RFID this is just a logical port of the java 1.4 FOSSTRAK implementation
+            String alphanumsix;
+            StringBuilder buffer = new StringBuilder("");
+            int len = binary.Length;
+            for (int i = 0; i < len; i += 6)
+            {
+                int j = int.Parse(Bin2Dec(padBinary(binary.Substring(i, i + 6), 8)));
+                if (j < 32)
+                {
+                    j += 64;
+                }
+                buffer.Append((char)j);
+            }
+            alphanumsix = buffer.ToString();
+            return alphanumsix;
+        }
+
+        private String Bin2UpperCaseFive(String binary)
+        {
+            // TODO Buy ISO 15962 and figure out how single char compaction works 
+            // with RFID this is just a logical port of the java 1.4 FOSSTRAK implementation
+            String uppercasefive;
+            StringBuilder buffer = new StringBuilder();
+            int len = binary.Length;
+            for (int i = 0; i < len; i += 5)
+            {
+                int j = int.Parse(Bin2Dec(padBinary(binary.Substring(i, i + 5), 8)));
+                buffer.Append((char)(j + 64));
+            }
+            uppercasefive = buffer.ToString();
+            return uppercasefive;
+        }
+
+
+        public String Bin2Dec(String binary)
+        {
+            // TODO Buy ISO 15962 and figure out how single char compaction works 
+            // with RFID this is just a logical port of the java 1.4 FOSSTRAK implementation
+            if (binary.Length == 0)
+            {
+                return "0";
+            }
+            else
+            {
+                long dec = long.Parse(binary);
+                return dec.ToString();
+            }
+        }
+
+        private String padBinary(String binary, int reqlen)
+        {
+            // TODO Buy ISO 15962 and figure out how single char compaction works 
+            // with RFID this is just a logical port of the java 1.4 FOSSTRAK implementation
+            String rv;
+            int l = binary.Length;
+            int pad = (reqlen - (l % reqlen)) % reqlen; // (8 - (1 % 5)) % 8
+            StringBuilder buffer = new StringBuilder();
+            for (int i = 0; i < pad; i++)
+            {
+                buffer.Append("0");
+            }
+            buffer.Append(binary);
+            rv = buffer.ToString();
+            return rv;
+        }
+
+        private String StripPadChar(String padded, PadDirectionList dir, String padchar)
+        {
+            if (dir == PadDirectionList.LEFT)
+            {
+                return padded.Substring(padded.IndexOf(padchar));
+            }
+            else
+            {
+                return padded.Substring(0, padded.Length - padded.LastIndexOf(padchar));
+            }
+        }
+
+        private String ApplyPadChar(String bare, PadDirectionList dir, String padchar, int requiredLength)
+        {
+            if (dir == null || padchar == null || requiredLength == -1)
+            {
+                return bare;
+            }
+            else
+            {
+                StringBuilder buf = new StringBuilder(requiredLength);
+                for (int i = 0; i < requiredLength - bare.Length; i++)
+                {
+                    buf.Append(padchar);
+                }
+
+                if (dir == PadDirectionList.RIGHT)
+                    return bare + buf.ToString();
+                else
+                    // if (dir == PadDirectionList.LEFT)
+                    return buf.ToString() + bare;
+            }
+        }
     }
 }

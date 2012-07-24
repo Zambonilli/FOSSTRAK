@@ -35,6 +35,5 @@ namespace FOSSTRAK.TDT
             : base(message)
         {
         }
-
     }
 }
