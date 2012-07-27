@@ -150,11 +150,14 @@ namespace FOSSTRAK.TDT
             // determine the input Option
             Tuple<Scheme, Level, Option> inputOption = GetInputOption(epcIdentifier, parameterList);
 
-            // determine the output Option, seems to easy of a query
+            // determine the output Option, seems to easy of a query...
             Tuple<Scheme, Level, Option> outputOption = _options.Single((o) => o.Item2.type == outputFormat & o.Item3.optionKey == inputOption.Item3.optionKey);
 
             // extract the input tokens
-            String[] tokens = ExtractInputTokens(epcIdentifier, parameterList, inputOption, outputOption);
+            String[] fieldTokens = ExtractInputTokens(epcIdentifier, parameterList, inputOption, outputOption);
+
+            // now derive some new tokens from basic fx & input tokens
+            Dictionary<String, String> derivedTokens = ExtractDerivedTokens(inputOption, fieldTokens);
 
             return null;
         }
@@ -269,6 +272,155 @@ namespace FOSSTRAK.TDT
                 throw new TDTTranslationException("Multiple matching Scheme, Level and Options for the input & inputParameters");
             }
             return results[0];
+        }
+
+        /// <summary>
+        /// Method for deriving new tokens from the 
+        /// </summary>
+        /// <param name="fieldTokens">The extracted field tokens from the input</param>
+        /// <param name="inputOption">The epcIdentifier&apos;s Scheme,Level and Option</param>
+        /// <param name="outputOption">The requested Scheme, Level and Option for output</param>
+        /// <returns>
+        /// An associative array of the derived values
+        /// </returns>
+        private Dictionary<String, String> ExtractDerivedTokens(Tuple<Scheme, Level, Option> inputOption, String[] fieldTokens)
+        {
+            Dictionary<String, String> derivedTokens = new Dictionary<string, string>();
+            foreach (Rule r in inputOption.Item2.rule)
+            {
+                // parse the command name & it's parameters
+                Regex rx = new Regex(@"^(.+)\((.+)\)$");
+                Match m = rx.Match(r.function);
+                if ((m.Success) &
+                    (m.Captures.Count == 2))
+                {
+                    //TODO Switch to an AST via codedom 
+                    String functionName = m.Captures[0].Value.ToLower().Trim();
+                    String[] functionParameters = m.Captures[1].Value.Split(',');
+                    String seq1 = inputOption.Item3.field.Single(f => f.name == functionParameters[0]).seq;
+                    String sequence1Value = fieldTokens[int.Parse(seq1)];
+                    switch (functionName)
+                    {
+                        case "tablelookup":
+                            {
+                                // EX: TABLELOOKUP(gs1companyprefixindex,tdt64bitcpi,gs1companyprefixindex,gs1companyprefix)
+                                if (functionParameters[1].Trim().ToLower() == "tdt64bitcpi")
+                                {
+                                    derivedTokens.Add(r.newFieldName, _gs1cpi[sequence1Value]);
+                                }
+                                else
+                                {
+                                    throw new TDTTranslationException("TDTFileNotFound " + functionParameters[1] + " auxillary file not found");
+                                }
+                                break;
+                            }
+                        case "length":
+                            {
+                                derivedTokens.Add(r.newFieldName, sequence1Value.Length.ToString());
+                                break;
+                            }
+                        case "gs1checksum":
+                            {
+                                int checksum;
+                                int weight;
+                                int total = 0;
+                                int len = sequence1Value.Length;
+                                int d;
+                                for (int i = 0; i < len; i++)
+                                {
+                                    if (i % 2 == 0)
+                                    {
+                                        weight = -3;
+                                    }
+                                    else
+                                    {
+                                        weight = -1;
+                                    }
+                                    d = int.Parse(sequence1Value.Substring(len - 1 - i, len - i));
+                                    total += weight * d;
+                                }
+                                checksum = (10 + total % 10) % 10;
+                                derivedTokens.Add(r.newFieldName, checksum.ToString());
+                                break;
+                            }
+                        case "substr":
+                            {
+                                if (functionParameters.Length == 2)
+                                {
+                                    derivedTokens.Add(r.newFieldName, sequence1Value.Substring(int.Parse(functionParameters[1])));
+                                }
+                                else if (functionParameters.Length == 3)
+                                {
+                                    derivedTokens.Add(r.newFieldName, sequence1Value.Substring(int.Parse(functionParameters[1]), int.Parse(functionParameters[2])));
+                                }
+                                break;
+                            }
+                        case "concat":
+                            {
+                                StringBuilder buffer = new StringBuilder();
+                                for (int p1 = 0; p1 < functionParameters.Length; p1++)
+                                {
+                                    Match m2 = new Regex(("\"(.*?)\"|'(.*?)'|[0-9]")).Match(fieldTokens[p1]);
+                                    if (m2.Success)
+                                    {
+                                        buffer.Append(functionParameters[p1]);
+                                    }
+                                    else
+                                    {
+                                        if (derivedTokens.ContainsKey(functionParameters[p1]))
+                                        {
+                                            buffer.Append(derivedTokens[functionParameters[p1]]);
+                                        }
+                                        String temp = fieldTokens.SingleOrDefault(t => t == functionParameters[p1]);
+                                        if (temp != null)
+                                        {
+                                            buffer.Append(temp);
+                                        }
+                                    }
+                                }
+                                derivedTokens.Add(r.newFieldName, buffer.ToString());
+                                break;
+                            }
+                        case "add":
+                            {
+                                int value1 = int.Parse(sequence1Value);
+                                int value2 = int.Parse(functionParameters[1]);
+                                derivedTokens.Add(r.newFieldName, (value1 + value2).ToString());
+                                break;
+                            }
+                        case "multiply":
+                            {
+                                int value1 = int.Parse(sequence1Value);
+                                int value2 = int.Parse(functionParameters[1]);
+                                derivedTokens.Add(r.newFieldName, (value1 * value2).ToString());
+                                break;
+                            }
+                        case "divide":
+                            {
+                                int value1 = int.Parse(sequence1Value);
+                                int value2 = int.Parse(functionParameters[1]);
+                                derivedTokens.Add(r.newFieldName, (value1 / value2).ToString());
+                                break;
+                            }
+                        case "subtract":
+                            {
+                                int value1 = int.Parse(sequence1Value);
+                                int value2 = int.Parse(functionParameters[1]);
+                                derivedTokens.Add(r.newFieldName, (value1 - value2).ToString());
+                                break;
+                            }
+                        case "mod":
+                            {
+                                int value1 = int.Parse(sequence1Value);
+                                int value2 = int.Parse(functionParameters[1]);
+                                derivedTokens.Add(r.newFieldName, (value1 % value2).ToString());
+                                break;
+                            }
+                    }
+
+                }
+            }
+            return derivedTokens;
         }
 
         /// <summary>
