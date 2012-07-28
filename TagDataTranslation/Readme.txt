@@ -2,3 +2,10 @@
 
 XSD classes generated from the Microsoft xsd.exe tool
 xsd.exe /classes /language:cs /namespace:FOSSTRAK.TDT EPCTagDataTranslation.xsd
+
+
+TODO
+1.) Create a class for binary compaction
+2.) ABNF conversion logic
+3.) Change the EXTRACT & FORMAT logic to a ctor compiled AST
+
