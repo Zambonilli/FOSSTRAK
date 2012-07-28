@@ -153,12 +153,22 @@ namespace FOSSTRAK.TDT
             // determine the output Option, seems to easy of a query...
             Tuple<Scheme, Level, Option> outputOption = _options.Single((o) => o.Item2.type == outputFormat & o.Item3.optionKey == inputOption.Item3.optionKey);
 
+            // create the tokens associative array
+            Dictionary<String, String> tokens = new Dictionary<string, string>();
+
             // extract the input tokens
-            String[] fieldTokens = ExtractInputTokens(epcIdentifier, parameterList, inputOption, outputOption);
+            ExtractInputTokens(epcIdentifier, parameterList, inputOption, outputOption, tokens);
 
             // now derive some new tokens from basic fx & input tokens
-            Dictionary<String, String> extractTokens = ProcessRules(inputOption, fieldTokens, ModeList.EXTRACT);
+            ProcessRules(inputOption, ModeList.EXTRACT, tokens);
 
+            // now format the tokens for output
+            ProcessRules(outputOption, ModeList.FORMAT, tokens);
+
+            // Convert the tokens to binary if we have to
+            ConvertTokensToBinary(outputOption, tokens);
+
+            // use ABNF grammer to build the output string
 
 
             return null;
@@ -277,18 +287,11 @@ namespace FOSSTRAK.TDT
         }
 
         /// <summary>
-        /// Method for deriving new tokens from the 
+        /// Method for processing extract & format rules
         /// </summary>
-        /// <param name="fieldTokens">The extracted field tokens from the input</param>
-        /// <param name="inputOption">The epcIdentifier&apos;s Scheme,Level and Option</param>
-        /// <param name="ruleType">The type of rule to process</param>
-        /// <returns>
-        /// An associative array of the derived values
-        /// </returns>
-        private Dictionary<String, String> ProcessRules(Tuple<Scheme, Level, Option> inputOption, String[] fieldTokens, ModeList ruleType)
+        private void ProcessRules(Tuple<Scheme, Level, Option> option, ModeList ruleType, Dictionary<String, String> tokens)
         {
-            Dictionary<String, String> derivedTokens = new Dictionary<string, string>();
-            foreach (Rule r in inputOption.Item2.rule)
+            foreach (Rule r in option.Item2.rule)
             {
                 if (r.type == ruleType)
                 {
@@ -301,8 +304,8 @@ namespace FOSSTRAK.TDT
                         //TODO Switch to an AST via codedom 
                         String functionName = m.Captures[0].Value.ToLower().Trim();
                         String[] functionParameters = m.Captures[1].Value.Split(',');
-                        String seq1 = inputOption.Item3.field.Single(f => f.name == functionParameters[0]).seq;
-                        String sequence1Value = fieldTokens[int.Parse(seq1)];
+                        String field1Name = option.Item3.field.Single(f => f.name == functionParameters[0]).name;
+                        String field1Value = tokens[field1Name];
                         switch (functionName)
                         {
                             case "tablelookup":
@@ -310,7 +313,7 @@ namespace FOSSTRAK.TDT
                                     // EX: TABLELOOKUP(gs1companyprefixindex,tdt64bitcpi,gs1companyprefixindex,gs1companyprefix)
                                     if (functionParameters[1].Trim().ToLower() == "tdt64bitcpi")
                                     {
-                                        derivedTokens.Add(r.newFieldName, _gs1cpi[sequence1Value]);
+                                        tokens.Add(r.newFieldName, _gs1cpi[field1Value]);
                                     }
                                     else
                                     {
@@ -320,7 +323,7 @@ namespace FOSSTRAK.TDT
                                 }
                             case "length":
                                 {
-                                    derivedTokens.Add(r.newFieldName, sequence1Value.Length.ToString());
+                                    tokens.Add(r.newFieldName, field1Value.Length.ToString());
                                     break;
                                 }
                             case "gs1checksum":
@@ -328,7 +331,7 @@ namespace FOSSTRAK.TDT
                                     int checksum;
                                     int weight;
                                     int total = 0;
-                                    int len = sequence1Value.Length;
+                                    int len = field1Value.Length;
                                     int d;
                                     for (int i = 0; i < len; i++)
                                     {
@@ -340,22 +343,22 @@ namespace FOSSTRAK.TDT
                                         {
                                             weight = -1;
                                         }
-                                        d = int.Parse(sequence1Value.Substring(len - 1 - i, len - i));
+                                        d = int.Parse(field1Value.Substring(len - 1 - i, len - i));
                                         total += weight * d;
                                     }
                                     checksum = (10 + total % 10) % 10;
-                                    derivedTokens.Add(r.newFieldName, checksum.ToString());
+                                    tokens.Add(r.newFieldName, checksum.ToString());
                                     break;
                                 }
                             case "substr":
                                 {
                                     if (functionParameters.Length == 2)
                                     {
-                                        derivedTokens.Add(r.newFieldName, sequence1Value.Substring(int.Parse(functionParameters[1])));
+                                        tokens.Add(r.newFieldName, field1Value.Substring(int.Parse(functionParameters[1])));
                                     }
                                     else if (functionParameters.Length == 3)
                                     {
-                                        derivedTokens.Add(r.newFieldName, sequence1Value.Substring(int.Parse(functionParameters[1]), int.Parse(functionParameters[2])));
+                                        tokens.Add(r.newFieldName, field1Value.Substring(int.Parse(functionParameters[1]), int.Parse(functionParameters[2])));
                                     }
                                     break;
                                 }
@@ -364,67 +367,68 @@ namespace FOSSTRAK.TDT
                                     StringBuilder buffer = new StringBuilder();
                                     for (int p1 = 0; p1 < functionParameters.Length; p1++)
                                     {
-                                        Match m2 = new Regex(("\"(.*?)\"|'(.*?)'|[0-9]")).Match(fieldTokens[p1]);
+                                        String fieldName = option.Item3.field.Single(f => f.name == functionParameters[p1]).name;
+                                        String fieldValue = tokens[fieldName];
+                                        Match m2 = new Regex(("\"(.*?)\"|'(.*?)'|[0-9]")).Match(fieldValue);
                                         if (m2.Success)
                                         {
                                             buffer.Append(functionParameters[p1]);
                                         }
                                         else
                                         {
-                                            if (derivedTokens.ContainsKey(functionParameters[p1]))
+                                            if (tokens.ContainsKey(functionParameters[p1]))
                                             {
-                                                buffer.Append(derivedTokens[functionParameters[p1]]);
+                                                buffer.Append(tokens[functionParameters[p1]]);
                                             }
-                                            String temp = fieldTokens.SingleOrDefault(t => t == functionParameters[p1]);
+                                            String temp = tokens.Keys.SingleOrDefault(t => t == functionParameters[p1]);
                                             if (temp != null)
                                             {
                                                 buffer.Append(temp);
                                             }
                                         }
                                     }
-                                    derivedTokens.Add(r.newFieldName, buffer.ToString());
+                                    tokens.Add(r.newFieldName, buffer.ToString());
                                     break;
                                 }
                             case "add":
                                 {
-                                    int value1 = int.Parse(sequence1Value);
+                                    int value1 = int.Parse(field1Value);
                                     int value2 = int.Parse(functionParameters[1]);
-                                    derivedTokens.Add(r.newFieldName, (value1 + value2).ToString());
+                                    tokens.Add(r.newFieldName, (value1 + value2).ToString());
                                     break;
                                 }
                             case "multiply":
                                 {
-                                    int value1 = int.Parse(sequence1Value);
+                                    int value1 = int.Parse(field1Value);
                                     int value2 = int.Parse(functionParameters[1]);
-                                    derivedTokens.Add(r.newFieldName, (value1 * value2).ToString());
+                                    tokens.Add(r.newFieldName, (value1 * value2).ToString());
                                     break;
                                 }
                             case "divide":
                                 {
-                                    int value1 = int.Parse(sequence1Value);
+                                    int value1 = int.Parse(field1Value);
                                     int value2 = int.Parse(functionParameters[1]);
-                                    derivedTokens.Add(r.newFieldName, (value1 / value2).ToString());
+                                    tokens.Add(r.newFieldName, (value1 / value2).ToString());
                                     break;
                                 }
                             case "subtract":
                                 {
-                                    int value1 = int.Parse(sequence1Value);
+                                    int value1 = int.Parse(field1Value);
                                     int value2 = int.Parse(functionParameters[1]);
-                                    derivedTokens.Add(r.newFieldName, (value1 - value2).ToString());
+                                    tokens.Add(r.newFieldName, (value1 - value2).ToString());
                                     break;
                                 }
                             case "mod":
                                 {
-                                    int value1 = int.Parse(sequence1Value);
+                                    int value1 = int.Parse(field1Value);
                                     int value2 = int.Parse(functionParameters[1]);
-                                    derivedTokens.Add(r.newFieldName, (value1 % value2).ToString());
+                                    tokens.Add(r.newFieldName, (value1 % value2).ToString());
                                     break;
                                 }
                         }
                     }
                 }
             }
-            return derivedTokens;
         }
 
         /// <summary>
@@ -434,11 +438,11 @@ namespace FOSSTRAK.TDT
         /// <param name="parameterList">IEnumerable of kvp parameters for doing the translation</param>
         /// <param name="option">The <paramref name="epcIdentifier"/>&apos;s option</param>
         /// <returns>An array of the extracted tokens from the <paramref name="epcIdentifier"/></returns>
-        private String[] ExtractInputTokens(String epcIdentifier, IEnumerable<KeyValuePair<String, String>> parameterList, Tuple<Scheme, Level, Option> inputOption, Tuple<Scheme, Level, Option> outputOption)
+        private void ExtractInputTokens(String epcIdentifier, IEnumerable<KeyValuePair<String, String>> parameterList,
+            Tuple<Scheme, Level, Option> inputOption, Tuple<Scheme, Level, Option> outputOption, Dictionary<String, String> tokens)
         {
             // now extract the various fields for the option from the input
             Match m = new Regex(String.Format(c_REGEXLINEFORMATTER, inputOption.Item3.pattern)).Match(epcIdentifier);
-            String[] fields = new String[inputOption.Item3.field.Length];
             Field f;
             String token;
             for (int i = 0; i < inputOption.Item3.field.Length; i++)
@@ -527,9 +531,8 @@ namespace FOSSTRAK.TDT
                 }
 
                 // add the extracted, validated & formated token to the return array
-                fields[i] = token;
+                tokens.Add(f.name, token);
             }
-            return fields;
         }
 
         /// <summary>
@@ -770,6 +773,97 @@ namespace FOSSTRAK.TDT
             return rv;
         }
 
+        public String dec2bin(String d)
+        {
+            // TODO Buy ISO 15962 and figure out how single char compaction works 
+            // with RFID this is just a logical port of the java 1.4 FOSSTRAK implementation
+            if (d.Length == 0)
+            {
+                return "0";
+            }
+            else
+            {
+                StringBuilder sb = new StringBuilder();
+                foreach (string c1 in d.Select(c2 => Convert.ToString(c2, 2)))
+                {
+                    sb.Append(c1);
+                }
+                return sb.ToString();
+            }
+        }
+
+        private String uppercasefive2bin(String uppercasefive)
+        {
+            // TODO Buy ISO 15962 and figure out how single char compaction works 
+            // with RFID this is just a logical port of the java 1.4 FOSSTRAK implementation
+            StringBuilder buffer = new StringBuilder();
+            int len = uppercasefive.Length;
+            byte[] bytes = Encoding.ASCII.GetBytes(uppercasefive);
+            for (int i = 0; i < len; i++)
+            {
+                buffer.Append(padBinary(dec2bin((bytes[i] % 32).ToString()), 8).Substring(3, 8));
+            }
+            return buffer.ToString();
+        }
+        
+        private String alphanumsix2bin(String alphanumsix)
+        {
+            // TODO Buy ISO 15962 and figure out how single char compaction works 
+            // with RFID this is just a logical port of the java 1.4 FOSSTRAK implementation
+            StringBuilder buffer = new StringBuilder();
+            int len = alphanumsix.Length;
+            byte[] bytes = Encoding.ASCII.GetBytes(alphanumsix);
+            for (int i = 0; i < len; i++)
+            {
+                buffer.Append(padBinary(dec2bin((bytes[i] % 64).ToString()),8).Substring(2, 8));
+            }
+            return buffer.ToString();
+        }
+
+        private String asciiseven2bin(String asciiseven)
+        {
+            // TODO Buy ISO 15962 and figure out how single char compaction works 
+            // with RFID this is just a logical port of the java 1.4 FOSSTRAK implementation
+            StringBuilder buffer = new StringBuilder();
+            int len = asciiseven.Length;
+            byte[] bytes = Encoding.ASCII.GetBytes(asciiseven);
+            for (int i = 0; i < len; i++)
+            {
+                buffer.Append(padBinary(dec2bin((bytes[i] % 128).ToString()),
+                        8).Substring(1, 8));
+            }
+            return buffer.ToString();
+        }
+
+        private String bytestring2bin(String bytestring)
+        {
+            StringBuilder buffer = new StringBuilder();
+            int len = bytestring.Length;
+            byte[] bytes = Encoding.ASCII.GetBytes(bytestring);
+            for (int i = 0; i < len; i++)
+            {
+                buffer.Append(padBinary(dec2bin((bytes[i]).ToString()), 8));
+            }
+            return buffer.ToString();
+        }
+
+        private String StringToBinary(String value, CompactionMethodList compaction)
+        {
+            switch (compaction)
+            {
+                case CompactionMethodList.Item5bit:
+                    return uppercasefive2bin(value);
+                case CompactionMethodList.Item6bit:
+                    return alphanumsix2bin(value);
+                case CompactionMethodList.Item7bit:
+                    return asciiseven2bin(value);
+                case CompactionMethodList.Item8bit:
+                    return bytestring2bin(value);
+                default:
+                    throw new TDTTranslationException("Invalid compaction value " + compaction.ToString());
+            }
+        }
+
         private String StripPadChar(String padded, PadDirectionList dir, String padchar)
         {
             if (dir == PadDirectionList.LEFT)
@@ -779,6 +873,42 @@ namespace FOSSTRAK.TDT
             else
             {
                 return padded.Substring(0, padded.Length - padded.LastIndexOf(padchar));
+            }
+        }
+
+        private void ConvertTokensToBinary(Tuple<Scheme, Level, Option> outputOption, Dictionary<String, String> tokens)
+        {
+            if (outputOption.Item2.type == LevelTypeList.BINARY)
+            {
+                foreach (Field f in outputOption.Item3.field)
+                {
+                    // check if we pad as a string token before converting to binary
+                    if ((!String.IsNullOrEmpty(f.padChar)) &
+                        (f.padDirSpecified))
+                    {
+                        // pad the token
+                        tokens[f.name] = ApplyPadChar(tokens[f.name], f.padDir, f.padChar, int.Parse(f.length));
+                    }
+
+                    // now convert to binary
+                    if (f.compactionSpecified)
+                    {
+                        CheckTokenCharacterSet(f, tokens[f.name]);
+
+                        tokens[f.name] = StringToBinary(tokens[f.name], f.compaction);
+                    }
+                    else
+                    {
+                        CheckTokenMinMax(f, tokens[f.name]);
+                        tokens[f.name] = dec2bin(tokens[f.name]);
+                    }
+
+                    // now pad the binary
+                    if (f.bitPadDirSpecified)
+                    {
+                        tokens[f.name] = ApplyPadChar(tokens[f.name], f.bitPadDir, "0", int.Parse(f.length));
+                    }
+                }
             }
         }
 
