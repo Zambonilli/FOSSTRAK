@@ -150,8 +150,8 @@ namespace FOSSTRAK.TDT
             // determine the input Option
             Tuple<Scheme, Level, Option> inputOption = GetInputOption(epcIdentifier, parameterList);
 
-            // determine the output Option, seems to easy of a query...
-            Tuple<Scheme, Level, Option> outputOption = _options.Single((o) => o.Item2.type == outputFormat & o.Item3.optionKey == inputOption.Item3.optionKey);
+            // determine the output Option, seems to easy of a query
+            Tuple<Scheme, Level, Option> outputOption = _options.Single((o) => o.Item1.name == inputOption.Item1.name & o.Item2.type == outputFormat & o.Item3.optionKey == inputOption.Item3.optionKey);
 
             // create the tokens associative array
             Dictionary<String, String> tokens = new Dictionary<string, string>();
@@ -169,9 +169,7 @@ namespace FOSSTRAK.TDT
             ConvertTokensToBinary(outputOption, tokens);
 
             // use ABNF grammer to build the output string
-
-
-            return null;
+            return BuildGrammer(outputOption, tokens);
         }
 
         /// <summary>
@@ -296,16 +294,16 @@ namespace FOSSTRAK.TDT
                 if (r.type == ruleType)
                 {
                     // parse the command name & it's parameters
-                    Regex rx = new Regex(@"^(.+)\((.+)\)$");
+                    Regex rx = new Regex(@"^(.+?)\((.+?)\)$");
                     Match m = rx.Match(r.function);
                     if ((m.Success) &
-                        (m.Captures.Count == 2))
+                        (m.Groups.Count == 3)) //TODO fix regex to have 2 groups & not a match on the whole expression
                     {
-                        //TODO Switch to an AST via codedom 
-                        String functionName = m.Captures[0].Value.ToLower().Trim();
-                        String[] functionParameters = m.Captures[1].Value.Split(',');
-                        String field1Name = option.Item3.field.Single(f => f.name == functionParameters[0]).name;
-                        String field1Value = tokens[field1Name];
+                        //TODO Switch to a parser & AST
+                        String functionName = m.Groups[1].Value.ToLower().Trim();
+                        String[] functionParameters = m.Groups[2].Value.Split(',');
+                        //String field1Name = option.Item3.field.Single(f => f.name == functionParameters[0]).name;
+                        String field1Value = tokens[functionParameters[0]];
                         switch (functionName)
                         {
                             case "tablelookup":
@@ -533,6 +531,42 @@ namespace FOSSTRAK.TDT
                 // add the extracted, validated & formated token to the return array
                 tokens.Add(f.name, token);
             }
+        }
+
+        /// <summary>
+        /// Builds the out string using ABNF protocol
+        /// </summary>
+        /// <param name="outputOption">The output option</param>
+        /// <param name="tokens">The extracted,derived and translated tokens</param>
+        /// <returns>
+        /// The converted outbound string
+        /// </returns>
+        private String BuildGrammer(Tuple<Scheme, Level, Option> outputOption, Dictionary<String, String> tokens)
+        {
+            StringBuilder outboundstring = new StringBuilder();
+            String[] fields = new Regex("\\s+").Split(outputOption.Item3.grammar);
+            for (int i = 0; i < fields.Length; i++)
+            {
+                String formattedparam;
+                if (fields[i].Substring(0, 1) == "'")
+                {
+                    formattedparam = fields[i].Substring(1, fields[i].Length - 1);
+                }
+                else
+                {
+                    if ((outputOption.Item2.type == LevelTypeList.TAG_ENCODING) || (outputOption.Item2.type == LevelTypeList.PURE_IDENTITY))
+                    {
+
+                        formattedparam = Uri.UnescapeDataString(tokens[fields[i]]);
+                    }
+                    else
+                    {
+                        formattedparam = tokens[fields[i]];
+                    }
+                }
+                outboundstring.Append(formattedparam);
+            }
+            return outboundstring.ToString();
         }
 
         /// <summary>
