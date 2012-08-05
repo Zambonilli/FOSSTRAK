@@ -23,9 +23,9 @@ namespace FOSSTRAK.TDT.Tests
         {
             TDTEngine engine = new TDTEngine();
             List<KeyValuePair<String, String>> inputParameters = new List<KeyValuePair<String, String>>();
-            inputParameters.Add(new KeyValuePair<string, string>("taglength", "96"));
-            inputParameters.Add(new KeyValuePair<string, string>("filter", "3"));
-            inputParameters.Add(new KeyValuePair<string, string>("gs1companyprefixlength", "7"));
+            inputParameters.Add(new KeyValuePair<string, string>("taglength", "96"));               // Binary requiredFormattingParameter
+            inputParameters.Add(new KeyValuePair<string, string>("filter", "3"));                   // Binary requiredFormattingParamter
+            inputParameters.Add(new KeyValuePair<string, string>("gs1companyprefixlength", "7"));   // AI requiredParsingParamter
             String original = "gtin=00037000302414;serial=1041970";
             String result = engine.Translate(original, inputParameters, LevelTypeList.BINARY);
             Assert.AreEqual(result, "001100000111010000000010010000100010000000011101100010000100000000000000000011111110011000110010");

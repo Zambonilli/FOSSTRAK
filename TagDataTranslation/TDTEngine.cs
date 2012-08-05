@@ -156,6 +156,12 @@ namespace FOSSTRAK.TDT
             // create the tokens associative array
             Dictionary<String, String> tokens = new Dictionary<string, string>();
 
+            // add the input parameters to the tokens
+            foreach (KeyValuePair<String, String> parameter in parameterList)
+            {
+                tokens.Add(parameter.Key, parameter.Value);
+            }
+
             // extract the input tokens
             ExtractInputTokens(epcIdentifier, parameterList, inputOption, outputOption, tokens);
 
@@ -289,140 +295,146 @@ namespace FOSSTRAK.TDT
         /// </summary>
         private void ProcessRules(Tuple<Scheme, Level, Option> option, ModeList ruleType, Dictionary<String, String> tokens)
         {
-            foreach (Rule r in option.Item2.rule)
+            if (option.Item2.rule != null)
             {
-                if (r.type == ruleType)
+                foreach (Rule r in option.Item2.rule)
                 {
-                    // parse the command name & it's parameters
-                    Regex rx = new Regex(@"^(.+?)\((.+?)\)$");
-                    Match m = rx.Match(r.function);
-                    if ((m.Success) &
-                        (m.Groups.Count == 3)) //TODO fix regex to have 2 groups & not a match on the whole expression
+                    if (r.type == ruleType)
                     {
-                        //TODO Switch to a parser & AST
-                        String functionName = m.Groups[1].Value.ToLower().Trim();
-                        String[] functionParameters = m.Groups[2].Value.Split(',');
-                        //String field1Name = option.Item3.field.Single(f => f.name == functionParameters[0]).name;
-                        String field1Value = tokens[functionParameters[0]];
-                        switch (functionName)
+                        // parse the command name & it's parameters
+                        Regex rx = new Regex(@"^(.+?)\((.+?)\)$");
+                        Match m = rx.Match(r.function);
+                        if ((m.Success) &
+                            (m.Groups.Count == 3)) //TODO fix regex to have 2 groups & not a match on the whole expression
                         {
-                            case "tablelookup":
-                                {
-                                    // EX: TABLELOOKUP(gs1companyprefixindex,tdt64bitcpi,gs1companyprefixindex,gs1companyprefix)
-                                    if (functionParameters[1].Trim().ToLower() == "tdt64bitcpi")
+                            //TODO Switch to a parser & AST
+                            String functionName = m.Groups[1].Value.ToLower().Trim();
+                            String[] functionParameters = m.Groups[2].Value.Split(',');
+                            //String field1Name = option.Item3.field.Single(f => f.name == functionParameters[0]).name;
+                            String field1Value = tokens[functionParameters[0]];
+                            switch (functionName)
+                            {
+                                case "tablelookup":
                                     {
-                                        tokens.Add(r.newFieldName, _gs1cpi[field1Value]);
-                                    }
-                                    else
-                                    {
-                                        throw new TDTTranslationException("TDTFileNotFound " + functionParameters[1] + " auxillary file not found");
-                                    }
-                                    break;
-                                }
-                            case "length":
-                                {
-                                    tokens.Add(r.newFieldName, field1Value.Length.ToString());
-                                    break;
-                                }
-                            case "gs1checksum":
-                                {
-                                    int checksum;
-                                    int weight;
-                                    int total = 0;
-                                    int len = field1Value.Length;
-                                    int d;
-                                    for (int i = 0; i < len; i++)
-                                    {
-                                        if (i % 2 == 0)
+                                        // EX: TABLELOOKUP(gs1companyprefixindex,tdt64bitcpi,gs1companyprefixindex,gs1companyprefix)
+                                        if (functionParameters[1].Trim().ToLower() == "tdt64bitcpi")
                                         {
-                                            weight = -3;
+                                            tokens.Add(r.newFieldName, _gs1cpi[field1Value]);
                                         }
                                         else
                                         {
-                                            weight = -1;
+                                            throw new TDTTranslationException("TDTFileNotFound " + functionParameters[1] + " auxillary file not found");
                                         }
-                                        d = int.Parse(field1Value.Substring(len - 1 - i, len - i));
-                                        total += weight * d;
+                                        break;
                                     }
-                                    checksum = (10 + total % 10) % 10;
-                                    tokens.Add(r.newFieldName, checksum.ToString());
-                                    break;
-                                }
-                            case "substr":
-                                {
-                                    if (functionParameters.Length == 2)
+                                case "length":
                                     {
-                                        tokens.Add(r.newFieldName, field1Value.Substring(int.Parse(functionParameters[1])));
+                                        tokens.Add(r.newFieldName, field1Value.Length.ToString());
+                                        break;
                                     }
-                                    else if (functionParameters.Length == 3)
+                                case "gs1checksum":
                                     {
-                                        tokens.Add(r.newFieldName, field1Value.Substring(int.Parse(functionParameters[1]), int.Parse(functionParameters[2])));
-                                    }
-                                    break;
-                                }
-                            case "concat":
-                                {
-                                    StringBuilder buffer = new StringBuilder();
-                                    for (int p1 = 0; p1 < functionParameters.Length; p1++)
-                                    {
-                                        String fieldName = option.Item3.field.Single(f => f.name == functionParameters[p1]).name;
-                                        String fieldValue = tokens[fieldName];
-                                        Match m2 = new Regex(("\"(.*?)\"|'(.*?)'|[0-9]")).Match(fieldValue);
-                                        if (m2.Success)
+                                        int checksum;
+                                        int weight;
+                                        int total = 0;
+                                        int len = field1Value.Length;
+                                        int d;
+                                        for (int i = 0; i < len; i++)
                                         {
-                                            buffer.Append(functionParameters[p1]);
-                                        }
-                                        else
-                                        {
-                                            if (tokens.ContainsKey(functionParameters[p1]))
+                                            if (i % 2 == 0)
                                             {
-                                                buffer.Append(tokens[functionParameters[p1]]);
+                                                weight = -3;
                                             }
-                                            String temp = tokens.Keys.SingleOrDefault(t => t == functionParameters[p1]);
-                                            if (temp != null)
+                                            else
                                             {
-                                                buffer.Append(temp);
+                                                weight = -1;
                                             }
+                                            d = int.Parse(field1Value.Substring(len - 1 - i, len - i));
+                                            total += weight * d;
                                         }
+                                        checksum = (10 + total % 10) % 10;
+                                        tokens.Add(r.newFieldName, checksum.ToString());
+                                        break;
                                     }
-                                    tokens.Add(r.newFieldName, buffer.ToString());
-                                    break;
-                                }
-                            case "add":
-                                {
-                                    int value1 = int.Parse(field1Value);
-                                    int value2 = int.Parse(functionParameters[1]);
-                                    tokens.Add(r.newFieldName, (value1 + value2).ToString());
-                                    break;
-                                }
-                            case "multiply":
-                                {
-                                    int value1 = int.Parse(field1Value);
-                                    int value2 = int.Parse(functionParameters[1]);
-                                    tokens.Add(r.newFieldName, (value1 * value2).ToString());
-                                    break;
-                                }
-                            case "divide":
-                                {
-                                    int value1 = int.Parse(field1Value);
-                                    int value2 = int.Parse(functionParameters[1]);
-                                    tokens.Add(r.newFieldName, (value1 / value2).ToString());
-                                    break;
-                                }
-                            case "subtract":
-                                {
-                                    int value1 = int.Parse(field1Value);
-                                    int value2 = int.Parse(functionParameters[1]);
-                                    tokens.Add(r.newFieldName, (value1 - value2).ToString());
-                                    break;
-                                }
-                            case "mod":
-                                {
-                                    int value1 = int.Parse(field1Value);
-                                    int value2 = int.Parse(functionParameters[1]);
-                                    tokens.Add(r.newFieldName, (value1 % value2).ToString());
-                                    break;
-                                }
+                                case "substr":
+                                    {
+                                        int offset;
+                                        if (!int.TryParse(functionParameters[1], out offset))
+                                        {
+                                            offset = int.Parse(tokens[functionParameters[1]]);
+                                        }
+                                        if (functionParameters.Length == 2)
+                                        {
+                                            tokens.Add(r.newFieldName, field1Value.Substring(offset));
+                                        }
+                                        else if (functionParameters.Length == 3)
+                                        {
+                                            int length;
+                                            if (!int.TryParse(functionParameters[2], out length))
+                                            {
+                                                length = int.Parse(tokens[functionParameters[2]]);
+                                            }
+                                            tokens.Add(r.newFieldName, field1Value.Substring(offset, length));
+                                        }
+                                        break;
+                                    }
+                                case "concat":
+                                    {
+                                        StringBuilder buffer = new StringBuilder();
+                                        for (int p1 = 0; p1 < functionParameters.Length; p1++)
+                                        {
+                                            Match m2 = new Regex(("\"(.*?)\"|'(.*?)'|[0-9]")).Match(functionParameters[p1]);
+                                            if (m2.Success)
+                                            {
+                                                buffer.Append(functionParameters[p1]);
+                                            }
+                                            else
+                                            {
+                                                if (tokens.ContainsKey(functionParameters[p1]))
+                                                {
+                                                    buffer.Append(tokens[functionParameters[p1]]);
+                                                }
+                                            }
+                                        }
+                                        tokens.Add(r.newFieldName, buffer.ToString());
+                                        break;
+                                    }
+                                case "add":
+                                    {
+                                        int value1 = int.Parse(field1Value);
+                                        int value2 = int.Parse(functionParameters[1]);
+                                        tokens.Add(r.newFieldName, (value1 + value2).ToString());
+                                        break;
+                                    }
+                                case "multiply":
+                                    {
+                                        int value1 = int.Parse(field1Value);
+                                        int value2 = int.Parse(functionParameters[1]);
+                                        tokens.Add(r.newFieldName, (value1 * value2).ToString());
+                                        break;
+                                    }
+                                case "divide":
+                                    {
+                                        int value1 = int.Parse(field1Value);
+                                        int value2 = int.Parse(functionParameters[1]);
+                                        tokens.Add(r.newFieldName, (value1 / value2).ToString());
+                                        break;
+                                    }
+                                case "subtract":
+                                    {
+                                        int value1 = int.Parse(field1Value);
+                                        int value2 = int.Parse(functionParameters[1]);
+                                        tokens.Add(r.newFieldName, (value1 - value2).ToString());
+                                        break;
+                                    }
+                                case "mod":
+                                    {
+                                        int value1 = int.Parse(field1Value);
+                                        int value2 = int.Parse(functionParameters[1]);
+                                        tokens.Add(r.newFieldName, (value1 % value2).ToString());
+                                        break;
+                                    }
+                            }
                         }
                     }
                 }
@@ -938,7 +950,8 @@ namespace FOSSTRAK.TDT
                     }
 
                     // now pad the binary
-                    if (f.bitPadDirSpecified)
+                    if ((f.bitPadDirSpecified) &
+                        (f.length != null))
                     {
                         tokens[f.name] = ApplyPadChar(tokens[f.name], f.bitPadDir, "0", int.Parse(f.length));
                     }
