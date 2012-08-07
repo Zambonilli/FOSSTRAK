@@ -562,7 +562,7 @@ namespace FOSSTRAK.TDT
                 String formattedparam;
                 if (fields[i].Substring(0, 1) == "'")
                 {
-                    formattedparam = fields[i].Substring(1, fields[i].Length - 1);
+                    formattedparam = fields[i].Substring(1, fields[i].Length - 2);
                 }
                 else
                 {
@@ -829,12 +829,8 @@ namespace FOSSTRAK.TDT
             }
             else
             {
-                StringBuilder sb = new StringBuilder();
-                foreach (string c1 in d.Select(c2 => Convert.ToString(c2, 2)))
-                {
-                    sb.Append(c1);
-                }
-                return sb.ToString();
+                int dec = int.Parse(d);
+                return Convert.ToString(dec, 2);
             }
         }
 
@@ -951,9 +947,9 @@ namespace FOSSTRAK.TDT
 
                     // now pad the binary
                     if ((f.bitPadDirSpecified) &
-                        (f.length != null))
+                        (!String.IsNullOrEmpty(f.bitLength)))
                     {
-                        tokens[f.name] = ApplyPadChar(tokens[f.name], f.bitPadDir, "0", int.Parse(f.length));
+                        tokens[f.name] = ApplyPadChar(tokens[f.name], f.bitPadDir, "0", int.Parse(f.bitLength));
                     }
                 }
             }
